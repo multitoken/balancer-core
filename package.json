@@ -39,8 +39,11 @@
         "web3": "^1.2.0"
     },
     "dependencies": {
+        "@openzeppelin/contracts": "^2.5.0",
         "decimal.js": "^10.2.0",
         "ganache-cli": "^6.7.0",
-        "global": "^4.4.0"
+        "global": "^4.4.0",
+        "truffle-hdwallet-provider": "^1.0.17",
+        "truffle-wallet-provider": "^0.0.5"
     }
 }
