@@ -88,10 +88,6 @@ contract('BPool', async (accounts) => {
             assert.equal(33.79, fromWei(totalDernomWeight));
         });
 
-        it('Fails binding more than 8 tokens', async () => {
-            await truffleAssert.reverts(pool.bind(ZZZ, toWei('50'), toWei('2')), 'ERR_MAX_TOKENS');
-        });
-
         it('Rebind token at a smaller balance', async () => {
             await pool.rebind(HHH, toWei('50'), toWei('2.1'));
             const balance = await pool.getBalance(HHH);
