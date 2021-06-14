@@ -15,11 +15,13 @@ pragma solidity 0.5.12;
 
 import "./BToken.sol";
 import "./BMath.sol";
+import "./CompoundToken.sol";
 
 contract BPool is BBronze, BToken, BMath {
 
     struct Record {
         bool bound;   // is token bound to pool
+        address cToken; // Compound similar contract of Token
         uint index;   // private
         uint denorm;  // denormalized weight
         uint balance;
@@ -169,9 +171,39 @@ contract BPool is BBronze, BToken, BMath {
         _viewlock_
         returns (uint)
     {
-
         require(_records[token].bound, "ERR_NOT_BOUND");
+
         return _records[token].balance;
+    }
+
+    function getOriginBalance(address token)
+        external
+        _viewlock_
+        returns (uint)
+    {
+        require(_records[token].bound, "ERR_NOT_BOUND");
+
+        CompoundToken cToken = CompoundToken(_records[token].cToken);
+
+        return cToken.balanceOfUnderlying(address(this));
+    }
+
+    function withdraw(address token, address to)
+        external
+        _viewlock_
+        returns (uint)
+    {
+        require(msg.sender == _controller, "ERR_NOT_CONTROLLER");
+        require(_records[token].bound, "ERR_NOT_BOUND");
+
+        CompoundToken cToken = CompoundToken(_records[token].cToken);
+
+        uint cUnderlyingBalance = cToken.balanceOfUnderlying(address(this));
+        uint diff = bsub(cUnderlyingBalance, _records[token].balance);
+
+        _pushUnderlying(token, to, diff);
+
+        return diff;
     }
 
     function getSwapFee()
@@ -190,18 +222,6 @@ contract BPool is BBronze, BToken, BMath {
         return _controller;
     }
 
-    function setSwapFee(uint swapFee)
-        external
-        _logs_
-        _lock_
-    { 
-        require(!_finalized, "ERR_IS_FINALIZED");
-        require(msg.sender == _controller, "ERR_NOT_CONTROLLER");
-        require(swapFee >= MIN_FEE, "ERR_MIN_FEE");
-        require(swapFee <= MAX_FEE, "ERR_MAX_FEE");
-        _swapFee = swapFee;
-    }
-
     function setController(address manager)
         external
         _logs_
@@ -209,16 +229,6 @@ contract BPool is BBronze, BToken, BMath {
     {
         require(msg.sender == _controller, "ERR_NOT_CONTROLLER");
         _controller = manager;
-    }
-
-    function setPublicSwap(bool public_)
-        external
-        _logs_
-        _lock_
-    {
-        require(!_finalized, "ERR_IS_FINALIZED");
-        require(msg.sender == _controller, "ERR_NOT_CONTROLLER");
-        _publicSwap = public_;
     }
 
     function finalize()
@@ -238,7 +248,7 @@ contract BPool is BBronze, BToken, BMath {
     }
 
 
-    function bind(address token, uint balance, uint denorm)
+    function bind(address token, address compoundToken, uint balance, uint denorm)
         external
         _logs_
         // _lock_  Bind does not lock because it jumps to `rebind`, which does
@@ -247,10 +257,12 @@ contract BPool is BBronze, BToken, BMath {
         require(!_records[token].bound, "ERR_IS_BOUND");
         require(!_finalized, "ERR_IS_FINALIZED");
 
+        require(compoundToken != address(0), "ERR_C_TOKEN_ADDRESS");
         require(_tokens.length < MAX_BOUND_TOKENS, "ERR_MAX_TOKENS");
 
         _records[token] = Record({
             bound: true,
+            cToken: compoundToken,
             index: _tokens.length,
             denorm: 0,    // balance and denorm will be validated
             balance: 0   // and set by `rebind`
@@ -320,6 +332,7 @@ contract BPool is BBronze, BToken, BMath {
         _tokens.pop();
         _records[token] = Record({
             bound: false,
+            cToken: address(0),
             index: 0,
             denorm: 0,
             balance: 0
@@ -327,40 +340,6 @@ contract BPool is BBronze, BToken, BMath {
 
         _pushUnderlying(token, msg.sender, bsub(tokenBalance, tokenExitFee));
         _pushUnderlying(token, _factory, tokenExitFee);
-    }
-
-    // Absorb any tokens that have been sent to this contract into the pool
-    function gulp(address token)
-        external
-        _logs_
-        _lock_
-    {
-        require(_records[token].bound, "ERR_NOT_BOUND");
-        _records[token].balance = IERC20(token).balanceOf(address(this));
-    }
-
-    function getSpotPrice(address tokenIn, address tokenOut)
-        external view
-        _viewlock_
-        returns (uint spotPrice)
-    {
-        require(_records[tokenIn].bound, "ERR_NOT_BOUND");
-        require(_records[tokenOut].bound, "ERR_NOT_BOUND");
-        Record storage inRecord = _records[tokenIn];
-        Record storage outRecord = _records[tokenOut];
-        return calcSpotPrice(inRecord.balance, inRecord.denorm, outRecord.balance, outRecord.denorm, _swapFee);
-    }
-
-    function getSpotPriceSansFee(address tokenIn, address tokenOut)
-        external view
-        _viewlock_
-        returns (uint spotPrice)
-    {
-        require(_records[tokenIn].bound, "ERR_NOT_BOUND");
-        require(_records[tokenOut].bound, "ERR_NOT_BOUND");
-        Record storage inRecord = _records[tokenIn];
-        Record storage outRecord = _records[tokenOut];
-        return calcSpotPrice(inRecord.balance, inRecord.denorm, outRecord.balance, outRecord.denorm, 0);
     }
 
     function joinPool(uint poolAmountOut, uint[] calldata maxAmountsIn)
@@ -417,7 +396,6 @@ contract BPool is BBronze, BToken, BMath {
         }
 
     }
-
 
     function swapExactAmountIn(
         address tokenIn,
@@ -543,7 +521,6 @@ contract BPool is BBronze, BToken, BMath {
 
         return (tokenAmountIn, spotPriceAfter);
     }
-
 
     function joinswapExternAmountIn(address tokenIn, uint tokenAmountIn, uint minPoolAmountOut)
         external
@@ -692,7 +669,6 @@ contract BPool is BBronze, BToken, BMath {
         return poolAmountIn;
     }
 
-
     // ==
     // 'Underlying' token-manipulation functions make external calls but are NOT locked
     // You must `_lock_` or otherwise ensure reentry-safety
@@ -700,13 +676,23 @@ contract BPool is BBronze, BToken, BMath {
     function _pullUnderlying(address erc20, address from, uint amount)
         internal
     {
+        CompoundToken cToken = CompoundToken(_records[erc20].cToken);
+
         bool xfer = IERC20(erc20).transferFrom(from, address(this), amount);
+
+        IERC20(erc20).approve(address(cToken), amount);
+        cToken.mint(amount);
+
         require(xfer, "ERR_ERC20_FALSE");
     }
 
     function _pushUnderlying(address erc20, address to, uint amount)
         internal
     {
+        uint redeemResult = CompoundToken(_records[erc20].cToken).redeemUnderlying(amount);
+
+        require(redeemResult <= 0, "REDEEM_WRONG_VALUE");
+
         bool xfer = IERC20(erc20).transfer(to, amount);
         require(xfer, "ERR_ERC20_FALSE");
     }
