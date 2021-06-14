@@ -394,7 +394,6 @@ contract BPool is BBronze, BToken, BMath {
             emit LOG_EXIT(msg.sender, t, tokenAmountOut);
             _pushUnderlying(t, msg.sender, tokenAmountOut);
         }
-
     }
 
     function swapExactAmountIn(
@@ -679,19 +678,19 @@ contract BPool is BBronze, BToken, BMath {
         CompoundToken cToken = CompoundToken(_records[erc20].cToken);
 
         bool xfer = IERC20(erc20).transferFrom(from, address(this), amount);
+        require(xfer, "ERR_ERC20_FALSE");
 
         IERC20(erc20).approve(address(cToken), amount);
-        cToken.mint(amount);
+        uint mintResult = cToken.mint(amount);
 
-        require(xfer, "ERR_ERC20_FALSE");
+        require(mintResult == 0, "REDEEM_WRONG_VALUE");
     }
 
     function _pushUnderlying(address erc20, address to, uint amount)
         internal
     {
         uint redeemResult = CompoundToken(_records[erc20].cToken).redeemUnderlying(amount);
-
-        require(redeemResult <= 0, "REDEEM_WRONG_VALUE");
+        require(redeemResult == 0, "REDEEM_WRONG_VALUE");
 
         bool xfer = IERC20(erc20).transfer(to, amount);
         require(xfer, "ERR_ERC20_FALSE");
