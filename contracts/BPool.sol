@@ -176,7 +176,7 @@ contract BPool is BBronze, BToken, BMath {
         return _records[token].balance;
     }
 
-    function getOriginBalance(address token)
+    function getAccumulatedBalance(address token)
         external
         returns (uint)
     {
@@ -187,20 +187,23 @@ contract BPool is BBronze, BToken, BMath {
         return cToken.balanceOfUnderlying(address(this));
     }
 
-    function withdraw(address token, address to)
+    function withdraw(address to)
         external
         _lock_
     {
         require(msg.sender == _controller, "ERR_NOT_CONTROLLER");
-        require(_records[token].bound, "ERR_NOT_BOUND");
 
-        uint cUnderlyingBalance = this.getOriginBalance(token);
+        for (uint i = 0; i < _tokens.length; i++) {
+            address token = _tokens[i];
 
-        require(cUnderlyingBalance >= _records[token].balance, "ERR_WRONG_UNDERLYING_BALANCE");
+            uint cUnderlyingBalance = this.getAccumulatedBalance(token);
 
-        uint diff = bsub(cUnderlyingBalance, _records[token].balance);
+            require(cUnderlyingBalance >= _records[token].balance, "ERR_WRONG_UNDERLYING_BALANCE");
 
-        _pushUnderlying(token, to, diff);
+            uint diff = bsub(cUnderlyingBalance, _records[token].balance);
+
+            _pushUnderlying(token, to, diff);
+        }
     }
 
     function getSwapFee()
