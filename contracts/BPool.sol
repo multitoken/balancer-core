@@ -178,7 +178,6 @@ contract BPool is BBronze, BToken, BMath {
 
     function getOriginBalance(address token)
         external
-        _viewlock_
         returns (uint)
     {
         require(_records[token].bound, "ERR_NOT_BOUND");
@@ -190,20 +189,18 @@ contract BPool is BBronze, BToken, BMath {
 
     function withdraw(address token, address to)
         external
-        _viewlock_
-        returns (uint)
+        _lock_
     {
         require(msg.sender == _controller, "ERR_NOT_CONTROLLER");
         require(_records[token].bound, "ERR_NOT_BOUND");
 
-        CompoundToken cToken = CompoundToken(_records[token].cToken);
+        uint cUnderlyingBalance = this.getOriginBalance(token);
 
-        uint cUnderlyingBalance = cToken.balanceOfUnderlying(address(this));
+        require(cUnderlyingBalance >= _records[token].balance, "ERR_WRONG_UNDERLYING_BALANCE");
+
         uint diff = bsub(cUnderlyingBalance, _records[token].balance);
 
         _pushUnderlying(token, to, diff);
-
-        return diff;
     }
 
     function getSwapFee()
@@ -690,9 +687,12 @@ contract BPool is BBronze, BToken, BMath {
         internal
     {
         uint redeemResult = CompoundToken(_records[erc20].cToken).redeemUnderlying(amount);
-        require(redeemResult == 0, "REDEEM_WRONG_VALUE");
+        require(redeemResult == 0, "ERR_REDEEM_ERROR");
 
-        bool xfer = IERC20(erc20).transfer(to, amount);
+        uint balance = IERC20(erc20).balanceOf(address(this));
+
+        bool xfer = IERC20(erc20).transfer(to, balance);
+
         require(xfer, "ERR_ERC20_FALSE");
     }
 
