@@ -1,3 +1,5 @@
+const HDWalletProvider = require("@truffle/hdwallet-provider");
+
 module.exports = {
     networks: {
         development: {
@@ -12,6 +14,23 @@ module.exports = {
             port: 8555,
             gas: 0xfffffffffff,
             gasPrice: 0x01,
+        },
+        matic: {
+            provider: () => new HDWalletProvider([process.env.DEPOYER_PRIVATE_KEY], 'https://rpc-mainnet.maticvigil.com'),
+            network_id: 137,
+            confirmations: 1,
+            timeoutBlocks: 200,
+            skipDryRun: true,
+            gasPrice: 5000000000, // 5 Gwei
+        },
+        bsc: {
+            provider: () => new HDWalletProvider([process.env.DEPOYER_PRIVATE_KEY], 'https://bsc-dataseed.binance.org'),
+            network_id: 56,
+            confirmations: 1,
+            timeoutBlocks: 200,
+            skipDryRun: true,
+            gasPrice: 5000000000, // 5 Gwei
+            // gas: 6722000,
         },
     },
     // Configure your compilers
